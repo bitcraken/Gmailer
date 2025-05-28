@@ -29,15 +29,19 @@ internal class Program
         var senderEmail = config.GetSection("AppSettings:EmailSettings:SenderEmail").Get<string>() ?? throw new Exception("Cannot read from settings.json file");
         var attachmentFolder = config.GetSection("AppSettings:EmailSettings:AttachmentFolder").Get<string>() ?? throw new Exception("Cannot read from settings.json file");
 
+        // Tasks to hold of all the messages that was sent
         var emailTasks = new List<Task<EmailStatus>>();
 
+        // Prepare and send emails to all recipients 
         foreach (var recipient in recipents)
         {
             emailTasks.Add(SendEmailAsync(recipient, subject, body, sender, senderEmail, attachmentFolder, smtpSettings));
         }
 
+        // Wait for all the messages to be sent
         var tasks = await Task.WhenAll(emailTasks);
 
+        // Print out the sent status of all the messages
         foreach (var task in tasks)
         {
             Console.WriteLine($"{task.To} {task.Status}");
@@ -51,6 +55,7 @@ internal class Program
     {
         var tcs = new TaskCompletionSource<EmailStatus>();
 
+        // SMTP client settings
         var smtp = new SmtpClient(smtpSettings.Host, smtpSettings.Port)
         {
             EnableSsl = smtpSettings.UseSsl,
@@ -58,6 +63,7 @@ internal class Program
             UseDefaultCredentials = false
         };
 
+        // Prepare the email message
         var email = new MailMessage()
         {
             From = new MailAddress(senderEmail, sender),
@@ -65,13 +71,16 @@ internal class Program
             Body = body
         };
 
+        // Main recipient address
         email.To.Add(new MailAddress(recipient.Emails.First(), recipient.Name));
+        // Add rest of the email to the CC list
         var ccList = recipient.Emails.Skip(1);
         foreach (var recipientEmail in ccList)
         {
             email.CC.Add(new MailAddress(recipientEmail, recipient.Name));
         }
 
+        // Add all attachments to the email
         foreach (var attachment in recipient.Attachments)
         {
             var filename = Path.Combine(attachmentFolder, attachment);
@@ -85,6 +94,8 @@ internal class Program
             email.Attachments.Add(data);
         }
 
+        // Event handler to check the send status of the email once it is sent to Gmail.
+        // Set the status results and dispose the resources
         smtp.SendCompleted += (s, e) =>
         {
             if (e.UserState is not TaskCompletionSource<EmailStatus> state)
@@ -102,7 +113,7 @@ internal class Program
             }
             else
             {
-                tcs.SetResult(new EmailStatus(email.To.First().DisplayName, "has been sent ✅"));
+                tcs.SetResult(new EmailStatus(email.To.First().DisplayName, "has been sent."));
             }
 
             if (s is SmtpClient smtpClient)
@@ -113,14 +124,17 @@ internal class Program
 
         try
         {
+            // Sending the email to Gmail
             smtp.SendAsync(email, tcs);
         }
         catch (Exception ex)
         {
+            // Dispose all in case there was an issue
             smtp.Dispose();
             email.Dispose();
             tcs.SetResult(new EmailStatus(email.To.First().Address, $"Exception: {ex.Message}"));
         }
+        // Return the status of the email send
         return tcs.Task;
     }
 }
